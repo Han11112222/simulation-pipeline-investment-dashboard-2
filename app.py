@@ -39,17 +39,10 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
         irr_val = npf.irr(flows)
 
     # 6. 최소 경제성 만족 판매량 역산 (NPV=0 기준)
-    # 목표 OCF = 순투자액 / PVIFA
     pvifa = (1 - (1 + rate) ** (-period)) / rate if rate != 0 else period
     target_ocf = net_inv / pvifa if net_inv > 0 else 0
-    
-    # 목표 EBIT = (목표 OCF - 감가상각비) / (1 - 세율)
     target_ebit = (target_ocf - depreciation) / (1 - tax)
-    
-    # 목표 매출마진 = 목표 EBIT + 판관비 + 감가상각비
     target_margin_total = target_ebit + cost_sga + depreciation
-    
-    # 필요 판매량 = 목표 매출마진 / 단위당 마진
     required_vol = target_margin_total / unit_margin if unit_margin > 0 else 0
     
     return {
@@ -60,7 +53,7 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     }
 
 # --------------------------------------------------------------------------
-# [UI] 좌측 사이드바
+# [UI] 좌측 사이드바 (분석 변수 설정)
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 분석 변수")
@@ -108,10 +101,14 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
     
     if res['irr'] is None:
         m2.metric("내부수익률 (IRR)", "계산 불가")
+        st.caption("🚩 사유: 초기 투자비 0원 이하 또는 운영 적자 지속")
     else:
         m2.metric("내부수익률 (IRR)", f"{res['irr']*100:.2f} %")
     m3.metric("할인회수기간 (DPP)", "회수 불가" if res['npv'] < 0 else "분석 필요")
 
+    st.divider()
+
+    # NPV 산출 사유 분석
     st.subheader("🧐 NPV 산출 사유 분석")
     st.markdown(f"""
     현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 원인은 다음과 같습니다:
@@ -122,7 +119,7 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
     4. **미래 가치 누적**: 매년 발생하는 약 **{abs(res['ocf']):,.0f}원**의 손실이 {period}년 동안 누적 및 할인되어 최종 NPV에 반영되었습니다.
     """)
 
-    # [추가] 경제성 만족을 위한 최소 판매량 제언
+    # [수정 요청 반영] 경제성 확보를 위한 제언
     st.divider()
     st.subheader("💡 경제성 확보를 위한 제언")
     if res['npv'] < 0:
@@ -132,7 +129,7 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         - 현재 연간 사용량: **{sim_vol:,.0f} MJ**
         - 경제성 만족 최소 사용량: **{res['required_vol']:,.0f} MJ**
         
-        👉 연간 사용량이 약 **{res['required_vol'] - sim_vol:,.0f} MJ** 더 확보될 경우, 최소 경제성 만족(NPV ≥ 0)이 가능합니다.
+        👉 연간 사용량이 **{res['required_vol']:,.0f} MJ**일 경우 최소 경제성 만족(NPV ≥ 0)이 가능합니다.
         """)
     else:
         st.success(f"✅ 현재 연간 사용량({sim_vol:,.0f} MJ)은 경제성 확보 기준({res['required_vol']:,.0f} MJ)을 충족합니다.")
