@@ -30,15 +30,26 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     # 4. 현금흐름 배열 생성
     flows = [-net_inv] + [ocf] * int(period)
     
-    # 5. 지표 산출
+    # 5. 지표 산출 및 IRR 사유 판별
     npv_val = manual_npv(rate, flows)
     
-    if net_inv <= 0 or sum(flows) <= 0:
-        irr_val = None
+    irr_val = None
+    irr_reason = ""
+    
+    if net_inv <= 0:
+        irr_reason = "초기 순투자비가 0원 이하(보조금/분담금 과다)로 수익률 산출이 의미가 없음"
+    elif ocf <= 0:
+        irr_reason = "운영 적자 지속(연간 OCF ≤ 0)으로 투자금 회수 불가"
     else:
-        irr_val = npf.irr(flows)
-
-    # 6. 최소 경제성 만족 판매량 역산 (NPV=0 기준)
+        try:
+            irr_val = npf.irr(flows)
+            if np.isnan(irr_val):
+                irr_val = None
+                irr_reason = "수학적 해를 찾을 수 없음 (비정상적 현금흐름)"
+        except:
+            irr_reason = "계산 오류 발생"
+    
+    # 6. 최소 경제성 만족 판매량 역산
     pvifa = (1 - (1 + rate) ** (-period)) / rate if rate != 0 else period
     target_ocf = net_inv / pvifa if net_inv > 0 else 0
     target_ebit = (target_ocf - depreciation) / (1 - tax)
@@ -46,14 +57,14 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     required_vol = target_margin_total / unit_margin if unit_margin > 0 else 0
     
     return {
-        "npv": npv_val, "irr": irr_val, "net_inv": net_inv, 
+        "npv": npv_val, "irr": irr_val, "irr_reason": irr_reason, "net_inv": net_inv, 
         "ocf": ocf, "ebit": ebit, "sga": cost_sga, "dep": depreciation,
         "margin": margin_total, "unit_margin": unit_margin, "flows": flows,
         "required_vol": required_vol
     }
 
 # --------------------------------------------------------------------------
-# [UI] 좌측 사이드바 (분석 변수 설정)
+# [UI] 좌측 사이드바
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 분석 변수")
@@ -62,7 +73,7 @@ with st.sidebar:
     tax_pct = st.number_input("법인세율+주민세율 (%)", value=20.9, step=0.1, format="%.1f")
     period = st.number_input("분석 및 상각기간 (년)", value=30, step=1)
     
-    st.subheader("💰 비용 단가 (2024년 기준)")
+    st.subheader("💰 비용 단가")
     c_maint = st.number_input("유지비 (원/m)", value=8222)
     c_adm_jeon = st.number_input("관리비 (원/전)", value=6209)
     c_adm_m = st.number_input("관리비 (원/m)", value=13605)
@@ -101,25 +112,19 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
     
     if res['irr'] is None:
         m2.metric("내부수익률 (IRR)", "계산 불가")
-        st.caption("🚩 사유: 초기 투자비 0원 이하 또는 운영 적자 지속")
+        st.error(f"🚩 **불가 사유**: {res['irr_reason']}")
     else:
         m2.metric("내부수익률 (IRR)", f"{res['irr']*100:.2f} %")
-    m3.metric("할인회수기간 (DPP)", "회수 불가" if res['npv'] < 0 else "분석 필요")
+    
+    m3.metric("할인회수기간 (DPP)", "회수 불가" if res['npv'] < 0 else "회수 가능")
 
-    st.divider()
-
-    # NPV 산출 사유 분석
     st.subheader("🧐 NPV 산출 사유 분석")
     st.markdown(f"""
-    현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 원인은 다음과 같습니다:
-    
-    1. **운영 수익성 결여**: 연간 매출 마진({res['margin']:,.0f}원)보다 판관비 합계({res['sga']:,.0f}원)가 더 커서 본원적인 영업 적자 상태입니다.
-    2. **감가상각 부담**: 총 공사비 70억 원에 대해 매년 **{res['dep']:,.0f}원**의 감가상각비가 발생하여 비용 부담을 가중시키고 있습니다.
-    3. **현금흐름 적자 지속**: 매년 **{res['ocf']:,.0f}원**의 **세후 수요개발 기대이익(적자)**이 발생하고 있습니다.
-    4. **미래 가치 누적**: 매년 발생하는 약 **{abs(res['ocf']):,.0f}원**의 손실이 {period}년 동안 누적 및 할인되어 최종 NPV에 반영되었습니다.
+    1. **운영 수익성**: 연간 매출 마진({res['margin']:,.0f}원) 대비 판관비 합계({res['sga']:,.0f}원) 검토 결과
+    2. **고정비 부담**: 매년 **{res['dep']:,.0f}원**의 감가상각비 발생
+    3. **현금흐름**: 매년 **{res['ocf']:,.0f}원**의 세후 수요개발 기대이익 발생
     """)
 
-    # [수정 요청 반영] 경제성 확보를 위한 제언
     st.divider()
     st.subheader("💡 경제성 확보를 위한 제언")
     if res['npv'] < 0:
