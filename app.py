@@ -64,7 +64,6 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     irr_reason = ""
     
     # IRR 예외처리 로직
-    # (단순 합계가 아닌, 실제 현금흐름 기준으로 판단)
     if net_inv <= 0:
         irr_reason = "초기 순투자비가 0원 이하(보조금/분담금 과다)로 수익률 산출 의미 없음"
     elif all(f <= 0 for f in ocfs): # 모든 연도 OCF가 0 이하일 때
@@ -99,9 +98,11 @@ with st.sidebar:
     st.header("⚙️ 분석 변수")
     st.subheader("📊 분석 기준")
     rate_pct = st.number_input("할인율 (%)", value=6.15, step=0.01, format="%.2f")
-    tax_pct = st.number_input("법인세율+주민세율 (%)", value=20.9, step=0.1, format="%.1f")
     
-    # [수정됨] 기간 입력 분리
+    # ✅ [수정완료] 법인세율 기본값 22.0%로 변경
+    tax_pct = st.number_input("법인세율+주민세율 (%)", value=22.0, step=0.1, format="%.1f")
+    
+    # 기간 입력 분리
     dep_period = st.number_input("감가상각 연수 (년)", value=30, step=1, help="회계상 자산의 가치를 비용 처리하는 기간입니다.")
     analysis_period = st.number_input("경제성 분석 연수 (년)", value=30, step=1, help="NPV/IRR을 산출할 현금흐름 예측 기간입니다.")
     
@@ -137,7 +138,6 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
     if sim_vol <= 0 or (sim_rev - sim_cost) <= 0:
         st.warning("⚠️ 수익 정보(판매량 및 매출마진)를 입력해 주세요.")
     else:
-        # [수정됨] 함수 호출 시 분리된 기간 변수 전달
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost,
                                    sim_jeon, RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m)
         
@@ -151,13 +151,11 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         else:
             m2.metric("내부수익률 (IRR)", f"{res['irr']*100:.2f} %")
         
-        # DPP는 단순 표시
         dpp_msg = "회수 가능" if res['npv'] > 0 else "회수 불가 (분석기간 내)"
         m3.metric("할인회수기간 (DPP)", dpp_msg)
 
         st.subheader("🧐 NPV 산출 사유 분석")
         
-        # 분석 기간과 상각 기간 비교 멘트
         period_comment = ""
         if analysis_period > dep_period:
             period_comment = f"(단, {dep_period}년 이후에는 감가상각이 종료되어 세금 부담이 증가함)"
@@ -180,7 +178,6 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         else:
             st.success(f"✅ 현재 연간 사용량({sim_vol:,.0f} MJ)은 경제성 확보 기준({res['required_vol']:,.0f} MJ)을 충족합니다.")
         
-        # 차트 그리기
         chart_data = pd.DataFrame({
             "Year": range(0, int(analysis_period) + 1),
             "Cumulative Cash Flow": np.cumsum(res['flows'])
