@@ -11,64 +11,99 @@ def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
 
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
-                          sim_jeon, rate, tax, period, c_maint, c_adm_jeon, c_adm_m):
+                          sim_jeon, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
     # 1. 초기 순투자액 (Year 0)
     net_inv = sim_inv - sim_contrib - sim_other
     
-    # 2. 비용 및 이익 계산
+    # 2. 고정 수익/비용 항목 계산
     unit_margin = (sim_rev - sim_cost) / sim_vol if sim_vol > 0 else 0
     margin_total = sim_rev - sim_cost
     
-    # 판관비 계산 (입력된 단가 기준)
+    # 판관비 (입력된 단가 기준)
     cost_sga = (sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon)
-    depreciation = sim_inv / period if period > 0 else 0
     
-    # 3. 세후 현금흐름 (OCF) 계산 (엑셀 로직: 적자 시 세금 절감 효과 반영)
-    ebit = margin_total - cost_sga - depreciation
-    net_income = ebit * (1 - tax) 
-    ocf = net_income + depreciation
+    # 연간 감가상각비 (정액법)
+    annual_depreciation = sim_inv / dep_period if dep_period > 0 else 0
     
-    # 4. 현금흐름 배열 생성
-    flows = [-net_inv] + [ocf] * int(period)
+    # 3. 연도별 현금흐름(Flows) 생성 (분석 기간만큼 반복)
+    flows = [-net_inv]
+    ocfs = []
     
-    # 5. 지표 산출 및 IRR 사유 판별
+    # 대표값(표시용) - 첫 해 기준
+    first_year_ocf = 0
+    first_year_ebit = 0
+    
+    for year in range(1, int(analysis_period) + 1):
+        # 감가상각 여부 확인 (현재 연도가 상각 기간 이내인가?)
+        if year <= dep_period:
+            curr_dep = annual_depreciation
+        else:
+            curr_dep = 0 # 상각 완료 후
+            
+        # 영업이익(EBIT)
+        ebit = margin_total - cost_sga - curr_dep
+        
+        # 당기순이익 (적자 시 세금 절감 효과 반영 로직 유지)
+        net_income = ebit * (1 - tax)
+        
+        # 영업활동 현금흐름 (OCF) = 당기순이익 + 현금유출없는비용(감가상각비)
+        ocf = net_income + curr_dep
+        
+        flows.append(ocf)
+        ocfs.append(ocf)
+        
+        if year == 1:
+            first_year_ocf = ocf
+            first_year_ebit = ebit
+
+    # 4. 지표 산출
     npv_val = manual_npv(rate, flows)
     
     irr_val = None
     irr_reason = ""
+    
+    # IRR 예외처리 로직
+    # (단순 합계가 아닌, 실제 현금흐름 기준으로 판단)
     if net_inv <= 0:
         irr_reason = "초기 순투자비가 0원 이하(보조금/분담금 과다)로 수익률 산출 의미 없음"
-    elif ocf <= 0:
-        irr_reason = "운영 적자 지속(연간 OCF ≤ 0)으로 투자금 회수 불가"
+    elif all(f <= 0 for f in ocfs): # 모든 연도 OCF가 0 이하일 때
+        irr_reason = "운영 적자 지속(모든 연도 OCF ≤ 0)으로 투자금 회수 불가"
     else:
         try:
             irr_val = npf.irr(flows)
         except:
-            irr_reason = "계산 오류 발생"
+            irr_reason = "계산 오류 발생 (현금흐름 부호 변동 없음 등)"
     
-    # 6. 최소 경제성 만족 판매량 역산 (NPV=0 기준)
-    pvifa = (1 - (1 + rate) ** (-period)) / rate if rate != 0 else period
+    # 5. 최소 경제성 만족 판매량 역산 (NPV=0 기준)
+    # *참고: 상각기간과 분석기간이 다르면 역산이 복잡해지므로, '분석 기간' 동안 균등하게 상각된다고 가정한 근사치(Annuity) 사용
+    pvifa = (1 - (1 + rate) ** (-analysis_period)) / rate if rate != 0 else analysis_period
     target_ocf = net_inv / pvifa if net_inv > 0 else 0
-    target_ebit = (target_ocf - depreciation) / (1 - tax)
-    target_margin_total = target_ebit + cost_sga + depreciation
+    
+    # 역산 시 감가상각비는 '감가상각 연수' 기준 사용 (보수적 접근)
+    target_ebit = (target_ocf - annual_depreciation) / (1 - tax)
+    target_margin_total = target_ebit + cost_sga + annual_depreciation
     required_vol = target_margin_total / unit_margin if unit_margin > 0 else 0
     
     return {
         "npv": npv_val, "irr": irr_val, "irr_reason": irr_reason, "net_inv": net_inv, 
-        "ocf": ocf, "ebit": ebit, "sga": cost_sga, "dep": depreciation,
-        "margin": margin_total, "flows": flows, "required_vol": required_vol
+        "first_ocf": first_year_ocf, "first_ebit": first_year_ebit, "sga": cost_sga, 
+        "dep": annual_depreciation, "margin": margin_total, "flows": flows, 
+        "required_vol": required_vol, "avg_ocf": np.mean(ocfs)
     }
 
 # --------------------------------------------------------------------------
-# [UI] 좌측 사이드바 (이전 기준 단가 복구)
+# [UI] 좌측 사이드바
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 분석 변수")
     st.subheader("📊 분석 기준")
     rate_pct = st.number_input("할인율 (%)", value=6.15, step=0.01, format="%.2f")
     tax_pct = st.number_input("법인세율+주민세율 (%)", value=20.9, step=0.1, format="%.1f")
-    period = st.number_input("분석 및 상각기간 (년)", value=30, step=1)
+    
+    # [수정됨] 기간 입력 분리
+    dep_period = st.number_input("감가상각 연수 (년)", value=30, step=1, help="회계상 자산의 가치를 비용 처리하는 기간입니다.")
+    analysis_period = st.number_input("경제성 분석 연수 (년)", value=30, step=1, help="NPV/IRR을 산출할 현금흐름 예측 기간입니다.")
     
     st.subheader("💰 비용 단가 (이전 기준값)")
     c_maint = st.number_input("유지비 (원/m)", value=8222, format="%d")
@@ -79,7 +114,7 @@ with st.sidebar:
     TAX = tax_pct / 100
 
 # --------------------------------------------------------------------------
-# [UI] 메인 화면 (입력 데이터는 0으로 초기화)
+# [UI] 메인 화면
 # --------------------------------------------------------------------------
 st.title("🏗️ 신규배관 경제성 분석 Simulation")
 
@@ -102,8 +137,9 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
     if sim_vol <= 0 or (sim_rev - sim_cost) <= 0:
         st.warning("⚠️ 수익 정보(판매량 및 매출마진)를 입력해 주세요.")
     else:
+        # [수정됨] 함수 호출 시 분리된 기간 변수 전달
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost,
-                                   sim_jeon, RATE, TAX, period, c_maint, c_adm_jeon, c_adm_m)
+                                   sim_jeon, RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m)
         
         st.divider()
         m1, m2, m3 = st.columns(3)
@@ -115,15 +151,23 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         else:
             m2.metric("내부수익률 (IRR)", f"{res['irr']*100:.2f} %")
         
-        m3.metric("할인회수기간 (DPP)", "회수 불가" if res['npv'] < 0 else "회수 가능")
+        # DPP는 단순 표시
+        dpp_msg = "회수 가능" if res['npv'] > 0 else "회수 불가 (분석기간 내)"
+        m3.metric("할인회수기간 (DPP)", dpp_msg)
 
         st.subheader("🧐 NPV 산출 사유 분석")
+        
+        # 분석 기간과 상각 기간 비교 멘트
+        period_comment = ""
+        if analysis_period > dep_period:
+            period_comment = f"(단, {dep_period}년 이후에는 감가상각이 종료되어 세금 부담이 증가함)"
+        
         st.markdown(f"""
-        현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 원인은 다음과 같습니다:
-        1. **운영 수익성**: 연간 매출 마진({res['margin']:,.0f}원) 대비 판관비 합계({res['sga']:,.0f}원) 검토 결과
-        2. **고정비 부담**: 매년 **{res['dep']:,.0f}원**의 감가상각비 발생
-        3. **현금흐름**: 매년 **{res['ocf']:,.0f}원**의 세후 수요개발 기대이익(OCF) 발생
-        4. **미래 가치 누적**: 매년 발생하는 약 **{abs(res['ocf']):,.0f}원**의 손익이 {period}년 동안 누적 및 할인되어 최종 NPV에 반영되었습니다.
+        현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 구조는 다음과 같습니다:
+        1. **운영 수익성**: 연간 매출 마진({res['margin']:,.0f}원) 대비 판관비 합계({res['sga']:,.0f}원) 차감
+        2. **고정비 부담**: 매년 **{res['dep']:,.0f}원**의 감가상각비 발생 ({dep_period}년간)
+        3. **현금흐름**: 첫 해 기준 **{res['first_ocf']:,.0f}원**의 세후 수요개발 기대이익(OCF) 발생 {period_comment}
+        4. **미래 가치 누적**: 총 **{analysis_period}년** 간의 현금흐름이 할인율 **{rate_pct}%**로 할인되어 반영됨
         """)
 
         st.divider()
@@ -131,9 +175,14 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         if res['npv'] < 0:
             st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
             st.info(f"""
-            👉 연간 사용량이 **{res['required_vol']:,.0f} MJ**일 경우 최소 경제성 만족(NPV ≥ 0)이 가능합니다.
+            👉 분석 기간({analysis_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ** 이상일 경우 NPV ≥ 0 달성이 가능합니다.
             """)
         else:
             st.success(f"✅ 현재 연간 사용량({sim_vol:,.0f} MJ)은 경제성 확보 기준({res['required_vol']:,.0f} MJ)을 충족합니다.")
         
-        st.line_chart(np.cumsum(res['flows']))
+        # 차트 그리기
+        chart_data = pd.DataFrame({
+            "Year": range(0, int(analysis_period) + 1),
+            "Cumulative Cash Flow": np.cumsum(res['flows'])
+        })
+        st.line_chart(chart_data, x="Year", y="Cumulative Cash Flow")
