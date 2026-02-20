@@ -115,44 +115,33 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 st.title("🏗️ 신규배관 경제성 분석 Simulation")
 
-# 용도 선택
+# ✅ [수정] 용도 선택을 최상단으로 이동 (가로형 라디오 버튼 적용)
 st.subheader("📌 가스 용도 선택")
 usage_type = st.radio(
     "분석할 가스 용도를 선택해 주세요.", 
     ["주택용 (공동주택/단독주택 등)", "기타 (업무용/산업용/영업용 등)"],
     horizontal=True,
-    label_visibility="collapsed" 
+    label_visibility="collapsed" # 라벨을 숨겨서 더 깔끔하게 연출
 )
 st.markdown("---")
 
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("1. 투자 정보")
-    # ✅ [수정] value=None으로 설정하여 초기값을 공란으로 만듦
-    sim_len_input = st.number_input("투자 길이 (m)", value=None, step=1.0)
-    sim_inv_input = st.number_input("총 공사비 (원)", value=None, format="%d")
-    sim_contrib_input = st.number_input("시설 분담금 (원)", value=None, format="%d")
-    sim_other_input = st.number_input("기타 이익 (보조금, 원)", value=None, format="%d")
-    sim_jeon_input = st.number_input("공급 전수 (전)", value=None, step=1)
+    sim_len = st.number_input("투자 길이 (m)", value=0.0, step=1.0)
+    sim_inv = st.number_input("총 공사비 (원)", value=0, format="%d")
+    sim_contrib = st.number_input("시설 분담금 (원)", value=0, format="%d")
+    sim_other = st.number_input("기타 이익 (보조금, 원)", value=0, format="%d")
+    sim_jeon = st.number_input("공급 전수 (전)", value=0)
 
 with col2:
     st.subheader("2. 수익 정보 (연간)")
-    # ✅ [수정] value=None으로 설정하여 초기값을 공란으로 만듦
-    sim_vol_input = st.number_input("연간 판매량 (MJ)", value=None)
-    sim_rev_input = st.number_input("가스 연간 판매액 (원)", value=None, format="%d")
-    sim_cost_input = st.number_input("가스 연간 판매원가 (원)", value=None, format="%d")
+    sim_vol = st.number_input("연간 판매량 (MJ)", value=0.0)
+    sim_rev = st.number_input("가스 연간 판매액 (원)", value=0, format="%d")
+    sim_cost = st.number_input("가스 연간 판매원가 (원)", value=0, format="%d")
     
+    # ✅ [수정] 선택된 용도에 따라 기본요금 자동 적용 (UI 하단에 깔끔하게 배치)
     st.markdown("---")
-    # 변수 매핑 (None일 경우 0으로 처리)
-    sim_len = sim_len_input if sim_len_input is not None else 0.0
-    sim_inv = sim_inv_input if sim_inv_input is not None else 0
-    sim_contrib = sim_contrib_input if sim_contrib_input is not None else 0
-    sim_other = sim_other_input if sim_other_input is not None else 0
-    sim_jeon = sim_jeon_input if sim_jeon_input is not None else 0
-    sim_vol = sim_vol_input if sim_vol_input is not None else 0.0
-    sim_rev = sim_rev_input if sim_rev_input is not None else 0
-    sim_cost = sim_cost_input if sim_cost_input is not None else 0
-
     if usage_type == "주택용 (공동주택/단독주택 등)":
         st.markdown("**🏡 주택용 기본요금 적용 중**")
         sim_basic_price = st.number_input("월 기본요금 단가 (원/전/월)", value=900, step=10, format="%d")
@@ -164,11 +153,8 @@ with col2:
         st.info("해당 용도는 세대별 기본요금이 합산되지 않습니다.")
 
 if st.button("🚀 경제성 분석 실행", type="primary"):
-    # 입력 검증
-    if None in [sim_len_input, sim_inv_input, sim_vol_input, sim_rev_input, sim_cost_input]:
-        st.warning("⚠️ 필수 투자 및 수익 정보(빈칸)를 모두 입력해 주세요.")
-    elif sim_vol <= 0 or ((sim_rev - sim_cost) + sim_basic_rev) <= 0:
-        st.warning("⚠️ 수익 정보(판매량 및 총 매출마진)를 확인해 주세요.")
+    if sim_vol <= 0 or ((sim_rev - sim_cost) + sim_basic_rev) <= 0:
+        st.warning("⚠️ 수익 정보(판매량 및 총 매출마진)를 입력해 주세요.")
     else:
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                                    sim_jeon, sim_basic_rev, RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m)
