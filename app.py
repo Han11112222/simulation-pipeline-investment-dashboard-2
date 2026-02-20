@@ -115,6 +115,16 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 st.title("🏗️ 신규배관 경제성 분석 Simulation")
 
+# ✅ [수정] 용도 선택을 최상단으로 이동 (가로형 라디오 버튼 적용)
+st.subheader("📌 가스 용도 선택")
+usage_type = st.radio(
+    "분석할 가스 용도를 선택해 주세요.", 
+    ["주택용 (공동주택/단독주택 등)", "기타 (업무용/산업용/영업용 등)"],
+    horizontal=True,
+    label_visibility="collapsed" # 라벨을 숨겨서 더 깔끔하게 연출
+)
+st.markdown("---")
+
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("1. 투자 정보")
@@ -126,18 +136,11 @@ with col1:
 
 with col2:
     st.subheader("2. 수익 정보 (연간)")
-    
-    # ✅ [수정] 용도 선택 드롭다운 추가
-    usage_type = st.selectbox(
-        "가스 용도 선택", 
-        ["주택용 (공동주택/단독주택 등)", "기타 (업무용/산업용/영업용 등)"]
-    )
-    
     sim_vol = st.number_input("연간 판매량 (MJ)", value=0.0)
     sim_rev = st.number_input("가스 연간 판매액 (원)", value=0, format="%d")
     sim_cost = st.number_input("가스 연간 판매원가 (원)", value=0, format="%d")
     
-    # ✅ [수정] 선택된 용도에 따라 기본요금 자동 적용
+    # ✅ [수정] 선택된 용도에 따라 기본요금 자동 적용 (UI 하단에 깔끔하게 배치)
     st.markdown("---")
     if usage_type == "주택용 (공동주택/단독주택 등)":
         st.markdown("**🏡 주택용 기본요금 적용 중**")
@@ -158,7 +161,6 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         
         st.divider()
         m1, m2, m3 = st.columns(3)
-        # ✅ [수정] 결과값 천 단위 콤마 확실하게 적용
         m1.metric("순현재가치 (NPV)", f"{res['npv']:,.0f} 원")
         
         if res['irr'] is None:
@@ -176,7 +178,6 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         if analysis_period > dep_period:
             period_comment = f"(단, {dep_period}년 이후에는 감가상각이 종료되어 세금 부담이 증가함)"
         
-        # ✅ [수정] 본문 텍스트 내 금액도 천 단위 콤마 적용
         st.markdown(f"""
         현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 구조는 다음과 같습니다:
         1. **운영 수익성**: 연간 총 마진({res['margin']:,.0f}원, *기본요금 수익 포함*) 대비 판관비 합계({res['sga']:,.0f}원) 차감
