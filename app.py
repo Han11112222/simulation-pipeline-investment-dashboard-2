@@ -160,11 +160,16 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
 
         st.divider()
         st.subheader("💡 경제성 확보를 위한 제언")
+        
+        # [수정된 부분] 42.563 기준으로 MJ -> m³ 변환 로직 추가
+        req_vol_m3 = res['required_vol'] / 42.563
+        sim_vol_m3 = sim_vol / 42.563
+        
         if res['npv'] < 0:
             st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
-            st.info(f"👉 분석 기간({analysis_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
+            st.info(f"👉 분석 기간({analysis_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} m³)** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
         else:
-            st.success(f"✅ 현재 연간 사용량({sim_vol:,.0f} MJ)은 경제성 확보 기준({res['required_vol']:,.0f} MJ)을 충족합니다.")
+            st.success(f"✅ 현재 연간 사용량 **{sim_vol:,.0f} MJ ({sim_vol_m3:,.0f} m³)** 은 경제성 확보 기준인 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} m³)** 을 충족합니다.")
         
         chart_data = pd.DataFrame({
             "Year": range(0, int(analysis_period) + 1),
