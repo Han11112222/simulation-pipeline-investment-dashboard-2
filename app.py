@@ -161,18 +161,87 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
         st.divider()
         st.subheader("💡 경제성 확보를 위한 제언")
         
-        # [수정된 부분] 42.563 기준으로 MJ -> m³ 변환 로직 추가
+        # [수정된 부분] m3 변환을 위해 기준열량 42.563 적용
         req_vol_m3 = res['required_vol'] / 42.563
         sim_vol_m3 = sim_vol / 42.563
         
         if res['npv'] < 0:
             st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
-            st.info(f"👉 분석 기간({analysis_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} m³)** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
+            st.info(f"👉 분석 기간({analysis_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
         else:
-            st.success(f"✅ 현재 연간 사용량 **{sim_vol:,.0f} MJ ({sim_vol_m3:,.0f} m³)** 은 경제성 확보 기준인 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} m³)** 을 충족합니다.")
+            st.success(f"✅ 현재 연간 사용량 **{sim_vol:,.0f} MJ ({sim_vol_m3:,.0f} ㎥)** 은 경제성 확보 기준인 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 을 충족합니다.")
         
         chart_data = pd.DataFrame({
             "Year": range(0, int(analysis_period) + 1),
             "Cumulative Cash Flow": np.cumsum(res['flows'])
         })
         st.line_chart(chart_data, x="Year", y="Cumulative Cash Flow")
+
+
+        # --------------------------------------------------------------------------
+        # [추가된 부분] 세부 분석 버튼 (Streamlit의 expander 활용)
+        # --------------------------------------------------------------------------
+        with st.expander("📊 [세부 분석] 연도별 손익 계산 및 NPV/IRR 상세 내역 보기"):
+            
+            years = [str(i) for i in range(1, int(analysis_period) + 1)]
+            
+            # --- 1. 연도별 손익 계산표 ---
+            val_sales = sim_rev
+            val_cogs = sim_cost
+            val_margin = sim_rev - sim_cost
+            val_basic = sim_basic_rev
+            val_maint = sim_len * c_maint
+            val_adm = (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon)
+            val_sga = val_maint + val_adm
+            val_dep = sim_inv / dep_period if dep_period > 0 else 0
+            val_ebit = (val_margin + val_basic) - val_sga - val_dep
+            val_ni = val_ebit * (1 - TAX)
+            val_ocf = val_ni + val_dep
+
+            pnl_dict = {
+                "구분": [
+                    "가스 판매액", "가스 판매 원가", "수익 (가스판매수익)", "수익 (기본요금수익)", 
+                    "판매관리비 (배관 유지비)", "판매관리비 (일반 관리비)", "판매관리비 (소계)", 
+                    "감가상각비", "세전 수요개발 기대이익", "세후 당기 손익", "세후 수요개발 기대이익"
+                ]
+            }
+            # 이 로직은 매년 고정값이므로 동일한 값을 30개 컬럼에 삽입합니다.
+            values_col = [val_sales, val_cogs, val_margin, val_basic, val_maint, val_adm, val_sga, val_dep, val_ebit, val_ni, val_ocf]
+            for y in years:
+                pnl_dict[y] = values_col
+                
+            pnl_df = pd.DataFrame(pnl_dict)
+            
+            st.markdown("#### 📝 연도별 손익 계산")
+            # 데이터프레임 스타일 적용 (천단위 콤마)
+            st.dataframe(pnl_df.style.format({y: "{:,.0f}" for y in years}), use_container_width=True, hide_index=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # --- 2. NPV 및 IRR 평가표 ---
+            npv_dict = {
+                "구분": [
+                    "세후 수요개발 기대이익", "배관공사 투자금액", "시설 분담금", "기타 이익", 
+                    "Free Cash Flow", "순현재가치(NPV) 환산", "미회수 투자액"
+                ]
+            }
+            
+            net_inv = sim_inv - sim_contrib - sim_other
+            
+            # 초기투자(0년차) 설정
+            npv_dict["초기투자"] = [0, -sim_inv, sim_contrib, sim_other, -net_inv, -net_inv, -net_inv]
+            
+            # 1~30년차 누적 및 할인율 적용 계산
+            cum_pv = -net_inv
+            for i, y in enumerate(years):
+                period = i + 1
+                discounted_fcf = val_ocf / ((1 + RATE) ** period)
+                cum_pv += discounted_fcf
+                npv_dict[y] = [val_ocf, 0, 0, 0, val_ocf, discounted_fcf, cum_pv]
+                
+            npv_df = pd.DataFrame(npv_dict)
+            
+            st.markdown("#### 💰 NPV 및 IRR 평가")
+            format_dict = {"초기투자": "{:,.0f}"}
+            format_dict.update({y: "{:,.0f}" for y in years})
+            st.dataframe(npv_df.style.format(format_dict), use_container_width=True, hide_index=True)
