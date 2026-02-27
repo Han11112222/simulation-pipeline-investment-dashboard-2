@@ -65,19 +65,27 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
         except:
             irr_reason = "계산 오류 발생 (현금흐름 부호 변동 없음 등)"
     
-    # 5. 최소 경제성 만족 판매량 역산 (NPV=0 기준)
-    pvifa = (1 - (1 + rate) ** (-analysis_period)) / rate if rate != 0 else analysis_period
-    target_ocf = net_inv / pvifa if net_inv > 0 else 0
-    
-    target_ebit = (target_ocf - annual_depreciation) / (1 - tax)
-    target_margin_total = target_ebit + cost_sga + annual_depreciation
-    required_vol = target_margin_total / unit_margin if unit_margin > 0 else 0
+    # 5. [수정] 감가상각 종료를 완벽히 반영한 목표 판매량 역산 함수
+    def get_req_vol(target_period):
+        pvifa_total = (1 - (1 + rate) ** (-target_period)) / rate if rate != 0 else target_period
+        pvifa_dep = (1 - (1 + rate) ** (-min(target_period, dep_period))) / rate if rate != 0 else min(target_period, dep_period)
+        
+        if pvifa_total > 0 and (1 - tax) > 0:
+            target_margin_minus_sga = (net_inv - annual_depreciation * tax * pvifa_dep) / (pvifa_total * (1 - tax))
+            target_margin = target_margin_minus_sga + cost_sga
+            req_v = target_margin / unit_margin if unit_margin > 0 else 0
+            return max(0, req_v)
+        return 0
+
+    required_vol_30 = get_req_vol(30)
+    required_vol_50 = get_req_vol(50)
     
     return {
         "npv": npv_val, "irr": irr_val, "irr_reason": irr_reason, "net_inv": net_inv, 
         "first_ocf": first_ocf, "first_ebit": first_ebit, "sga": cost_sga, 
         "dep": annual_depreciation, "margin": margin_total, "flows": flows, 
-        "required_vol": required_vol, "avg_ocf": np.mean(ocfs), "is_zombie": is_zombie,
+        "required_vol_30": required_vol_30, "required_vol_50": required_vol_50,
+        "avg_ocf": np.mean(ocfs), "is_zombie": is_zombie,
         "zombie_threshold_pct": zombie_threshold_pct
     }
 
@@ -194,7 +202,6 @@ if st.session_state.run_sim:
 
             st.divider()
             
-            # [추가된 부분 1] 좀비 배관 민감도 분석 (SGA 증가 한계점)
             st.subheader("📉 좀비 배관 민감도 분석 (유지/관리비 인상 리스크)")
             if res['is_zombie']:
                 st.error("🚨 이미 감가상각 종료 후 운영 적자가 발생하는 **좀비 배관** 상태입니다.")
@@ -208,25 +215,34 @@ if st.session_state.run_sim:
                 
             st.divider()
             
-            # [추가된 부분 2] 목표 판매량 강조 (MJ 및 m3 크게 표시)
+            # [추가된 부분] 30년 / 50년 달성 목표 판매량 비교
             st.subheader("💡 경제성 확보를 위한 제언")
             
-            req_vol_m3 = res['required_vol'] / 42.563
+            req_vol_m3_30 = res['required_vol_30'] / 42.563
+            req_vol_m3_50 = res['required_vol_50'] / 42.563
             sim_vol_m3 = sim_vol / 42.563
             
             if res['npv'] < 0:
                 st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
-                st.markdown(f"👉 **NPV ≥ 0 달성을 위한 최소 목표 판매량 (분석기간 {active_period}년 기준)**")
-                st.info(f"### **{res['required_vol']:,.0f} MJ** ≙ **{req_vol_m3:,.0f} ㎥**")
-            else:
-                st.success(f"✅ 현재 판매량은 경제성 확보 기준을 충족합니다.")
                 col_m1, col_m2 = st.columns(2)
                 with col_m1:
-                    st.markdown("👉 **경제성 확보 최소 기준**")
-                    st.info(f"**{res['required_vol']:,.0f} MJ** ≙ **{req_vol_m3:,.0f} ㎥**")
+                    st.markdown("👉 **[현재 기준] 30년 경제성 만족을 위한 최소 판매량**")
+                    st.info(f"### **{res['required_vol_30']:,.0f} MJ**\n\n≙ **{req_vol_m3_30:,.0f} ㎥**")
                 with col_m2:
+                    st.markdown("👉 **[장기 기준] 50년 경제성 만족을 위한 안정 판매량**")
+                    st.success(f"### **{res['required_vol_50']:,.0f} MJ**\n\n≙ **{req_vol_m3_50:,.0f} ㎥**")
+            else:
+                st.success(f"✅ 현재 판매량은 경제성 확보 기준을 충족합니다.")
+                col_m1, col_m2, col_m3 = st.columns(3)
+                with col_m1:
                     st.markdown("👉 **현재 입력 판매량**")
-                    st.success(f"**{sim_vol:,.0f} MJ** ≙ **{sim_vol_m3:,.0f} ㎥**")
+                    st.success(f"**{sim_vol:,.0f} MJ**\n\n(≙ {sim_vol_m3:,.0f} ㎥)")
+                with col_m2:
+                    st.markdown("👉 **30년 기준 (최소)**")
+                    st.info(f"**{res['required_vol_30']:,.0f} MJ**\n\n(≙ {req_vol_m3_30:,.0f} ㎥)")
+                with col_m3:
+                    st.markdown("👉 **50년 기준 (안정)**")
+                    st.info(f"**{res['required_vol_50']:,.0f} MJ**\n\n(≙ {req_vol_m3_50:,.0f} ㎥)")
         
         chart_data = pd.DataFrame({
             "Year": range(0, int(active_period) + 1),
