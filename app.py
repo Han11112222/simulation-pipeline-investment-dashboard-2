@@ -123,6 +123,8 @@ with col1:
 with col2:
     st.subheader("2. 수익 정보 (연간)")
     sim_vol = st.number_input("연간 판매량 (MJ)", value=0.0)
+    # [수정된 부분] MJ 입력 시 즉시 m3로 환산해서 보여주는 캡션 추가
+    st.caption(f"ℹ️ 환산 부피: **{sim_vol / 42.563:,.0f} ㎥** (적용 열량: 42.563 MJ/㎥)")
     sim_rev = st.number_input("가스 연간 판매액 (원)", value=0, format="%d")
     sim_cost = st.number_input("가스 연간 판매원가 (원)", value=0, format="%d")
     
