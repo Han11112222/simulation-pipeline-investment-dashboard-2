@@ -27,7 +27,6 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     ocfs = []
     
     for year in range(1, int(analysis_period) + 1):
-        # 감가상각은 dep_period(예: 30년) 이내에만 발생, 이후에는 0원 처리
         current_dep = annual_depreciation if year <= dep_period else 0
         current_ebit = margin_total - cost_sga - current_dep
         current_ni = current_ebit * (1 - tax)
@@ -39,11 +38,16 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     first_ocf = ocfs[0] if len(ocfs) > 0 else 0
     first_ebit = margin_total - cost_sga - annual_depreciation
     
-    # [추가] 좀비 배관(가짜 흑자) 판별 로직
-    # 감가상각 방패가 있을 때(1~30년)는 흑자(>0)인데, 방패가 사라지면(31년~) 적자(<0)가 되는 경우
+    # [추가] 좀비 배관(가짜 흑자) 판별 및 민감도 분석 로직
     ocf_with_dep = (margin_total - cost_sga - annual_depreciation) * (1 - tax) + annual_depreciation
     ocf_without_dep = (margin_total - cost_sga) * (1 - tax)
     is_zombie = (ocf_with_dep > 0) and (ocf_without_dep < 0)
+    
+    # 유지비/관리비가 몇 % 오르면 마진(margin_total)을 초과하여 좀비가 되는지 역산
+    if cost_sga > 0:
+        zombie_threshold_pct = (margin_total / cost_sga - 1) * 100
+    else:
+        zombie_threshold_pct = float('inf')
     
     # 4. 지표 산출
     npv_val = manual_npv(rate, flows)
@@ -73,7 +77,8 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
         "npv": npv_val, "irr": irr_val, "irr_reason": irr_reason, "net_inv": net_inv, 
         "first_ocf": first_ocf, "first_ebit": first_ebit, "sga": cost_sga, 
         "dep": annual_depreciation, "margin": margin_total, "flows": flows, 
-        "required_vol": required_vol, "avg_ocf": np.mean(ocfs), "is_zombie": is_zombie
+        "required_vol": required_vol, "avg_ocf": np.mean(ocfs), "is_zombie": is_zombie,
+        "zombie_threshold_pct": zombie_threshold_pct
     }
 
 # --------------------------------------------------------------------------
@@ -123,7 +128,6 @@ with col1:
 with col2:
     st.subheader("2. 수익 정보 (연간)")
     sim_vol = st.number_input("연간 판매량 (MJ)", value=0.0)
-    # [수정된 부분] MJ 입력 시 즉시 m3로 환산해서 보여주는 캡션 추가
     st.caption(f"ℹ️ 환산 부피: **{sim_vol / 42.563:,.0f} ㎥** (적용 열량: 42.563 MJ/㎥)")
     sim_rev = st.number_input("가스 연간 판매액 (원)", value=0, format="%d")
     sim_cost = st.number_input("가스 연간 판매원가 (원)", value=0, format="%d")
@@ -140,7 +144,6 @@ with col2:
         sim_basic_rev = 0
         st.info("해당 용도는 세대별 기본요금이 합산되지 않습니다.")
 
-# [보완] 버튼 클릭 상태를 기억하게 만들어, 하단 토글을 클릭해도 화면이 날아가지 않게 함
 if "run_sim" not in st.session_state:
     st.session_state.run_sim = False
 
@@ -151,25 +154,20 @@ if st.session_state.run_sim:
     if sim_vol <= 0 or ((sim_rev - sim_cost) + sim_basic_rev) <= 0:
         st.warning("⚠️ 수익 정보(판매량 및 총 매출마진)를 확인해 주세요. (0보다 커야 합니다)")
     else:
-        # 1. 상단 결과 출력을 위한 컨테이너 (토글과 계산 로직 분리를 위함)
         top_container = st.container()
         
-        # 2. 토글 버튼을 쏙! 그래프 바로 위에 배치하기 위한 빈 공간(placeholder)
         toggle_placeholder = st.empty()
         with toggle_placeholder:
             long_term_mode = st.toggle("📈 장기분석 (최대 50년) 활성화", value=False)
             
         active_period = 50 if long_term_mode else analysis_period
         
-        # 3. 토글 상태에 맞춰 즉시 경제성 계산 실행
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                                    sim_jeon, sim_basic_rev, RATE, TAX, dep_period, active_period, c_maint, c_adm_jeon, c_adm_m)
         
-        # 4. 상단 컨테이너에 지표 및 경고문 출력
         with top_container:
             st.divider()
             
-            # [추가된 부분] 좀비 배관 경고 출력
             if res['is_zombie']:
                 st.error("🧟‍♂️ **[주의] 좀비 배관 (가짜 흑자 구간) 감지!**\n\n초기 30년(감가상각 기간) 동안은 세금 혜택으로 인해 장부상 흑자를 띄지만, **감가상각이 종료되는 31년 차부터는 방패가 사라져 순수 운영 적자(마이너스)로 수직 낙하**하여 미래 세대에 엄청난 비용 부담을 주는 배관입니다. 아래 차트 위 **'장기분석 토글'**을 켜서 꺾이는 지점을 직접 확인해 보세요!")
                 
@@ -195,6 +193,22 @@ if st.session_state.run_sim:
             """)
 
             st.divider()
+            
+            # [추가된 부분 1] 좀비 배관 민감도 분석 (SGA 증가 한계점)
+            st.subheader("📉 좀비 배관 민감도 분석 (유지/관리비 인상 리스크)")
+            if res['is_zombie']:
+                st.error("🚨 이미 감가상각 종료 후 운영 적자가 발생하는 **좀비 배관** 상태입니다.")
+            elif res['margin'] <= 0:
+                st.error("🚨 매출 마진 자체가 0 이하인 구조적 적자 상태입니다.")
+            elif res['zombie_threshold_pct'] == float('inf'):
+                st.success("✅ 유지관리비가 0원으로 설정되어 있어 좀비 배관 전락 위험이 없습니다.")
+            else:
+                st.warning(f"⚠️ 현재 설정된 판관비(유지비+관리비)가 향후 **약 {res['zombie_threshold_pct']:,.1f}% 이상 상승**하면, 감가상각 종료 후 적자로 전환되는 **'좀비 배관'**이 됩니다.")
+                st.info(f"👉 **마진 방어선:** 총 마진({res['margin']:,.0f}원) = 판관비 합계({res['sga']:,.0f}원) + 잉여 마진({res['margin'] - res['sga']:,.0f}원)")
+                
+            st.divider()
+            
+            # [추가된 부분 2] 목표 판매량 강조 (MJ 및 m3 크게 표시)
             st.subheader("💡 경제성 확보를 위한 제언")
             
             req_vol_m3 = res['required_vol'] / 42.563
@@ -202,11 +216,18 @@ if st.session_state.run_sim:
             
             if res['npv'] < 0:
                 st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
-                st.info(f"👉 분석 기간({active_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
+                st.markdown(f"👉 **NPV ≥ 0 달성을 위한 최소 목표 판매량 (분석기간 {active_period}년 기준)**")
+                st.info(f"### **{res['required_vol']:,.0f} MJ** ≙ **{req_vol_m3:,.0f} ㎥**")
             else:
-                st.success(f"✅ 현재 연간 사용량 **{sim_vol:,.0f} MJ ({sim_vol_m3:,.0f} ㎥)** 은 경제성 확보 기준인 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 을 충족합니다.")
+                st.success(f"✅ 현재 판매량은 경제성 확보 기준을 충족합니다.")
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    st.markdown("👉 **경제성 확보 최소 기준**")
+                    st.info(f"**{res['required_vol']:,.0f} MJ** ≙ **{req_vol_m3:,.0f} ㎥**")
+                with col_m2:
+                    st.markdown("👉 **현재 입력 판매량**")
+                    st.success(f"**{sim_vol:,.0f} MJ** ≙ **{sim_vol_m3:,.0f} ㎥**")
         
-        # 5. 토글 밑에 그래프 및 세부표 출력 (자연스럽게 placeholder 아래에 예쁘게 위치함)
         chart_data = pd.DataFrame({
             "Year": range(0, int(active_period) + 1),
             "Cumulative Cash Flow": np.cumsum(res['flows'])
