@@ -138,71 +138,83 @@ with col2:
         sim_basic_rev = 0
         st.info("해당 용도는 세대별 기본요금이 합산되지 않습니다.")
 
-# [추가된 부분] 장기분석 토글 버튼
-long_term_mode = st.toggle("📈 장기분석 (최대 50년) 활성화", value=False)
-active_period = 50 if long_term_mode else analysis_period
+# [보완] 버튼 클릭 상태를 기억하게 만들어, 하단 토글을 클릭해도 화면이 날아가지 않게 함
+if "run_sim" not in st.session_state:
+    st.session_state.run_sim = False
 
 if st.button("🚀 경제성 분석 실행", type="primary"):
+    st.session_state.run_sim = True
+
+if st.session_state.run_sim:
     if sim_vol <= 0 or ((sim_rev - sim_cost) + sim_basic_rev) <= 0:
         st.warning("⚠️ 수익 정보(판매량 및 총 매출마진)를 확인해 주세요. (0보다 커야 합니다)")
     else:
+        # 1. 상단 결과 출력을 위한 컨테이너 (토글과 계산 로직 분리를 위함)
+        top_container = st.container()
+        
+        # 2. 토글 버튼을 쏙! 그래프 바로 위에 배치하기 위한 빈 공간(placeholder)
+        toggle_placeholder = st.empty()
+        with toggle_placeholder:
+            long_term_mode = st.toggle("📈 장기분석 (최대 50년) 활성화", value=False)
+            
+        active_period = 50 if long_term_mode else analysis_period
+        
+        # 3. 토글 상태에 맞춰 즉시 경제성 계산 실행
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                                    sim_jeon, sim_basic_rev, RATE, TAX, dep_period, active_period, c_maint, c_adm_jeon, c_adm_m)
         
-        st.divider()
-        
-        # [추가된 부분] 좀비 배관 경고 출력
-        if res['is_zombie']:
-            st.error("🧟‍♂️ **[주의] 좀비 배관 (가짜 흑자 구간) 감지!**\n\n초기 30년(감가상각 기간) 동안은 세금 혜택으로 인해 장부상 흑자를 유지하지만, **감가상각이 종료되는 시점부터는 세금 혜택이 사라져 순수 운영 적자(마이너스 현금흐름)로 수직 낙하**하여 미래에 부담을 주는 배관입니다. 장기분석 토글을 켜서 그래프의 꺾이는 지점을 확인해 보세요!")
+        # 4. 상단 컨테이너에 지표 및 경고문 출력
+        with top_container:
+            st.divider()
             
-        m1, m2, m3 = st.columns(3)
-        m1.metric("순현재가치 (NPV)", f"{res['npv']:,.0f} 원")
-        
-        if res['irr'] is None:
-            m2.metric("내부수익률 (IRR)", "계산 불가")
-            st.error(f"🚩 **불가 사유**: {res['irr_reason']}")
-        else:
-            m2.metric("내부수익률 (IRR)", f"{res['irr']*100:.2f} %")
-        
-        dpp_msg = "회수 가능" if res['npv'] > 0 else "회수 불가 (분석기간 내)"
-        m3.metric("할인회수기간 (DPP)", dpp_msg)
+            # [추가된 부분] 좀비 배관 경고 출력
+            if res['is_zombie']:
+                st.error("🧟‍♂️ **[주의] 좀비 배관 (가짜 흑자 구간) 감지!**\n\n초기 30년(감가상각 기간) 동안은 세금 혜택으로 인해 장부상 흑자를 띄지만, **감가상각이 종료되는 31년 차부터는 방패가 사라져 순수 운영 적자(마이너스)로 수직 낙하**하여 미래 세대에 엄청난 비용 부담을 주는 배관입니다. 아래 차트 위 **'장기분석 토글'**을 켜서 꺾이는 지점을 직접 확인해 보세요!")
+                
+            m1, m2, m3 = st.columns(3)
+            m1.metric("순현재가치 (NPV)", f"{res['npv']:,.0f} 원")
+            
+            if res['irr'] is None:
+                m2.metric("내부수익률 (IRR)", "계산 불가")
+                st.error(f"🚩 **불가 사유**: {res['irr_reason']}")
+            else:
+                m2.metric("내부수익률 (IRR)", f"{res['irr']*100:.2f} %")
+            
+            dpp_msg = "회수 가능" if res['npv'] > 0 else "회수 불가 (분석기간 내)"
+            m3.metric("할인회수기간 (DPP)", dpp_msg)
 
-        st.subheader("🧐 NPV 산출 사유 분석 (사내 엑셀 기준)")
-        st.markdown(f"""
-        현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 구조는 다음과 같습니다:
-        1. **운영 수익성**: 연간 총 마진({res['margin']:,.0f}원, *기본요금 수익 포함*) 대비 판관비 합계({res['sga']:,.0f}원) 차감
-        2. **고정비 부담**: 매년 **{res['dep']:,.0f}원**의 감가상각비 발생 (최대 {dep_period}년)
-        3. **현금흐름**: 초기(감가상각 기간)에는 **{res['first_ocf']:,.0f}원**의 세후 현금흐름 발생
-        4. **미래 가치 누적**: 총 **{active_period}년** 간의 현금흐름이 할인율 **{rate_pct}%**로 할인되어 반영됨
-        """)
+            st.subheader("🧐 NPV 산출 사유 분석 (사내 엑셀 기준)")
+            st.markdown(f"""
+            현재 NPV가 **{res['npv']:,.0f}원**으로 산출된 주요 구조는 다음과 같습니다:
+            1. **운영 수익성**: 연간 총 마진({res['margin']:,.0f}원, *기본요금 수익 포함*) 대비 판관비 합계({res['sga']:,.0f}원) 차감
+            2. **고정비 부담**: 매년 **{res['dep']:,.0f}원**의 감가상각비 발생 (최대 {dep_period}년)
+            3. **현금흐름**: 초기(감가상각 기간)에는 **{res['first_ocf']:,.0f}원**의 세후 현금흐름 발생
+            4. **미래 가치 누적**: 총 **{active_period}년** 간의 현금흐름이 할인율 **{rate_pct}%**로 할인되어 반영됨
+            """)
 
-        st.divider()
-        st.subheader("💡 경제성 확보를 위한 제언")
+            st.divider()
+            st.subheader("💡 경제성 확보를 위한 제언")
+            
+            req_vol_m3 = res['required_vol'] / 42.563
+            sim_vol_m3 = sim_vol / 42.563
+            
+            if res['npv'] < 0:
+                st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
+                st.info(f"👉 분석 기간({active_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
+            else:
+                st.success(f"✅ 현재 연간 사용량 **{sim_vol:,.0f} MJ ({sim_vol_m3:,.0f} ㎥)** 은 경제성 확보 기준인 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 을 충족합니다.")
         
-        req_vol_m3 = res['required_vol'] / 42.563
-        sim_vol_m3 = sim_vol / 42.563
-        
-        if res['npv'] < 0:
-            st.error(f"⚠️ 현재 분석 조건으로는 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
-            st.info(f"👉 분석 기간({active_period}년) 동안 연간 사용량이 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 이상일 경우 NPV ≥ 0 달성이 가능합니다.")
-        else:
-            st.success(f"✅ 현재 연간 사용량 **{sim_vol:,.0f} MJ ({sim_vol_m3:,.0f} ㎥)** 은 경제성 확보 기준인 **{res['required_vol']:,.0f} MJ ({req_vol_m3:,.0f} ㎥)** 을 충족합니다.")
-        
+        # 5. 토글 밑에 그래프 및 세부표 출력 (자연스럽게 placeholder 아래에 예쁘게 위치함)
         chart_data = pd.DataFrame({
             "Year": range(0, int(active_period) + 1),
             "Cumulative Cash Flow": np.cumsum(res['flows'])
         })
         st.line_chart(chart_data, x="Year", y="Cumulative Cash Flow")
 
-
-        # --------------------------------------------------------------------------
-        # [세부 분석] 감가상각 종료 이후의 다이나믹스까지 반영되도록 수정
-        # --------------------------------------------------------------------------
         with st.expander("📊 [세부 분석] 연도별 손익 계산 및 NPV/IRR 상세 내역 보기"):
             
             years = [str(i) for i in range(1, int(active_period) + 1)]
             
-            # --- 1. 연도별 손익 계산표 ---
             val_sales = sim_rev
             val_cogs = sim_cost
             val_margin = sim_rev - sim_cost
@@ -231,7 +243,6 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
             
             cum_pv = -net_inv
             
-            # 1~active_period년차까지 매년 감가상각 여부를 다이나믹하게 체크
             for i, y in enumerate(years):
                 period = i + 1
                 current_dep = sim_inv / dep_period if (dep_period > 0 and period <= dep_period) else 0
@@ -239,10 +250,8 @@ if st.button("🚀 경제성 분석 실행", type="primary"):
                 current_ni = current_ebit * (1 - TAX)
                 current_ocf = current_ni + current_dep
                 
-                # 손익 계산표 누적
                 pnl_dict[y] = [val_sales, val_cogs, val_margin, val_basic, val_maint, val_adm, val_sga, current_dep, current_ebit, current_ni, current_ocf]
                 
-                # NPV 표 누적
                 discounted_fcf = current_ocf / ((1 + RATE) ** period)
                 cum_pv += discounted_fcf
                 npv_dict[y] = [current_ocf, 0, 0, 0, current_ocf, discounted_fcf, cum_pv]
