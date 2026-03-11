@@ -234,21 +234,24 @@ if st.session_state.run_sim:
     if ((sim_rev - sim_cost) + sim_basic_rev) < 0:
         st.warning("⚠️ 수익 정보(총 매출마진)를 확인해 주세요. (0 이상이어야 분석 가능합니다)")
     else:
-        top_container = st.container()
+        # 화면 출력을 위한 공간(컨테이너)을 원하는 순서대로 미리 확보합니다.
+        result_top_container = st.container()
+        toggle_container = st.container()
+        chart_container = st.container()
         
-        toggle_placeholder = st.empty()
-        with toggle_placeholder:
-            # 기본 비활성화(False) 유지 상태
+        # 토글 버튼을 확보된 중간 컨테이너에 먼저 띄워 상태값을 받습니다.
+        with toggle_container:
             long_term_mode = st.toggle("📈 장기분석 (최대 50년) 활성화", value=False)
             
         active_period = 50 if long_term_mode else analysis_period
         
-        # [수정] 복합용도의 경우 변환된 단가를 파라미터로 넘김
+        # 토글에서 받은 기간값을 바탕으로 시뮬레이션 로직을 돌립니다.
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                                    sim_jeon, sim_basic_rev, RATE, TAX, dep_period, active_period, c_maint, c_adm_jeon, c_adm_m,
                                    effective_sales_price, effective_purchase_price)
         
-        with top_container:
+        # 이제 상단 결과 텍스트들을 첫 번째 컨테이너에 채워 넣습니다.
+        with result_top_container:
             st.divider()
             
             if res['is_zombie']:
@@ -328,6 +331,8 @@ if st.session_state.run_sim:
                 st.markdown("👉 **[안정 기준] 50년 경제성 만족**")
                 st.success(f"### **{res['required_vol_50']:,.0f} MJ**\n\n≙ **{req_vol_m3_50:,.0f} ㎥**")
         
+        # 마지막으로 그래프와 세부 분석표를 토글 아래쪽(세 번째 컨테이너)에 채워 넣습니다.
+        with chart_container:
             chart_data = pd.DataFrame({
                 "Year": range(0, int(active_period) + 1),
                 "Cumulative Cash Flow": np.cumsum(res['flows'])
