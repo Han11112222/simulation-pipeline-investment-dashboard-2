@@ -123,7 +123,6 @@ st.title("🏗️ 신규배관 경제성 분석 Simulation ver2")
 st.subheader("📌 가스 용도 및 요금 선택")
 st.markdown("분석할 가스 용도 그룹을 먼저 선택하신 후, 하단에서 세부 용도를 선택해 주세요.")
 
-# [수정] 복합용도 그룹 추가
 group_sel = st.radio("■ 용도 그룹", ["가정용", "일반용", "기타", "복합용도"], horizontal=True)
 
 if group_sel == "가정용":
@@ -136,7 +135,6 @@ elif group_sel == "기타":
     selected_gas_type = st.selectbox("↳ 세부 용도 선택", ["산업용", "연료전지", "열병합", "열전용설비(주택용 외)", "수송용"])
     is_residential = gas_rates[selected_gas_type]["is_residential"]
 else:
-    # [수정] 복합용도 선택 시 별도 처리
     selected_gas_type = "복합용도 (수기입력)"
     is_residential = st.checkbox("↳ 주택용 세대 기본요금 포함 여부 (체크 시 하단에 기본요금 활성화)", value=False)
 
@@ -165,7 +163,6 @@ with st.sidebar:
     st.markdown("---")
     st.header("📋 상품별 요금 (단가 확인 및 수정)")
     
-    # [수정] 복합용도일 때는 단가 입력창을 비활성화하고 안내문구 출력
     if group_sel == "복합용도":
         st.info("💡 **복합용도**는 메인 화면 우측 '수익 정보' 탭에서 연간 판매액과 판매원가 총액을 직접 수기 입력합니다.")
         sales_price_mj = 0.0
@@ -189,16 +186,23 @@ with col1:
 
 with col2:
     st.subheader("2. 수익 정보 (연간)")
-    sim_vol = st.number_input("연간 판매량 (MJ) - ⭐️제언된 목표량을 입력해보세요", value=0.0)
-    st.caption(f"ℹ️ 환산 부피: **{sim_vol / 42.563:,.0f} ㎥** (적용 열량: 42.563 MJ/㎥)")
     
-    # [수정] 복합용도면 수기 입력 활성화, 그 외는 자동계산 후 텍스트로 고정
+    # [수정포인트 1] 단위 환산 토글 추가 (기본값 True: m3 입력 활성화)
+    use_m3 = st.toggle("🔄 단위 환산 (㎥ 입력 활성화)", value=True)
+    
+    if use_m3:
+        input_vol = st.number_input("연간 판매량 (㎥) - ⭐️제언된 목표량을 입력해보세요", value=0.0)
+        sim_vol = input_vol * 42.563  # 입력받은 m3를 내부 계산용 MJ로 변환
+        st.caption(f"ℹ️ 환산 열량: **{sim_vol:,.0f} MJ** (적용 열량: 42.563 MJ/㎥)")
+    else:
+        sim_vol = st.number_input("연간 판매량 (MJ) - ⭐️제언된 목표량을 입력해보세요", value=0.0)
+        st.caption(f"ℹ️ 환산 부피: **{sim_vol / 42.563:,.0f} ㎥** (적용 열량: 42.563 MJ/㎥)")
+    
     if group_sel == "복합용도":
         st.markdown("👉 **[복합용도] 가스 연간 판매액 및 판매원가 직접 입력**")
         sim_rev = st.number_input("가스 연간 판매액 (원) 입력", value=0, format="%d")
         sim_cost = st.number_input("가스 연간 판매원가 (원) 입력", value=0, format="%d")
         
-        # 복합용도일 경우 목표판매량 산출을 위한 내부 환산 단가
         if sim_vol > 0:
             effective_sales_price = sim_rev / sim_vol
             effective_purchase_price = sim_cost / sim_vol
@@ -234,23 +238,19 @@ if st.session_state.run_sim:
     if ((sim_rev - sim_cost) + sim_basic_rev) < 0:
         st.warning("⚠️ 수익 정보(총 매출마진)를 확인해 주세요. (0 이상이어야 분석 가능합니다)")
     else:
-        # 화면 출력을 위한 공간(컨테이너)을 원하는 순서대로 미리 확보합니다.
         result_top_container = st.container()
         toggle_container = st.container()
         chart_container = st.container()
         
-        # 토글 버튼을 확보된 중간 컨테이너에 먼저 띄워 상태값을 받습니다.
         with toggle_container:
             long_term_mode = st.toggle("📈 장기분석 (최대 50년) 활성화", value=False)
             
         active_period = 50 if long_term_mode else analysis_period
         
-        # 토글에서 받은 기간값을 바탕으로 시뮬레이션 로직을 돌립니다.
         res = calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                                    sim_jeon, sim_basic_rev, RATE, TAX, dep_period, active_period, c_maint, c_adm_jeon, c_adm_m,
                                    effective_sales_price, effective_purchase_price)
         
-        # 이제 상단 결과 텍스트들을 첫 번째 컨테이너에 채워 넣습니다.
         with result_top_container:
             st.divider()
             
@@ -317,21 +317,21 @@ if st.session_state.run_sim:
             else:
                 st.error(f"⚠️ 현재 분석 조건으로는 30년 및 50년 기준 모두 경제성이 부족합니다. (목표 IRR {rate_pct}%)")
                 
+            # [수정포인트 2] 제언 결과 창에서 ㎥를 메인(###)으로, MJ를 서브(≙)로 위치 변경
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
                 st.markdown("👉 **현재 입력 판매량**")
                 if is_30_ok:
-                    st.success(f"### **{sim_vol:,.0f} MJ**\n\n≙ **{sim_vol_m3:,.0f} ㎥**")
+                    st.success(f"### **{sim_vol_m3:,.0f} ㎥**\n\n≙ **{sim_vol:,.0f} MJ**")
                 else:
-                    st.error(f"### **{sim_vol:,.0f} MJ**\n\n≙ **{sim_vol_m3:,.0f} ㎥**")
+                    st.error(f"### **{sim_vol_m3:,.0f} ㎥**\n\n≙ **{sim_vol:,.0f} MJ**")
             with col_m2:
                 st.markdown("👉 **[최소 기준] 30년 경제성 만족**")
-                st.info(f"### **{res['required_vol_30']:,.0f} MJ**\n\n≙ **{req_vol_m3_30:,.0f} ㎥**")
+                st.info(f"### **{req_vol_m3_30:,.0f} ㎥**\n\n≙ **{res['required_vol_30']:,.0f} MJ**")
             with col_m3:
                 st.markdown("👉 **[안정 기준] 50년 경제성 만족**")
-                st.success(f"### **{res['required_vol_50']:,.0f} MJ**\n\n≙ **{req_vol_m3_50:,.0f} ㎥**")
+                st.success(f"### **{req_vol_m3_50:,.0f} ㎥**\n\n≙ **{res['required_vol_50']:,.0f} MJ**")
         
-        # 마지막으로 그래프와 세부 분석표를 토글 아래쪽(세 번째 컨테이너)에 채워 넣습니다.
         with chart_container:
             chart_data = pd.DataFrame({
                 "Year": range(0, int(active_period) + 1),
